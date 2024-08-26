@@ -1,0 +1,118 @@
+Bilibili：与AI同行1996撰写，如有错漏，欢迎指正！
+
+
+特别注意事项：
+1、文档可能不全面，一些细节没有体现，结合视频教程食用更佳；
+2、所有相关的软件、文件名称不要使用中文名称，也不要有中文路径。
+C盘的中文用户名也不行，需要转移到别的非中文路径下。
+
+AI框架CUDA和cuDNN的安装(如果已安装，可跳过)：
+(1)CUDA下载地址(需下载显卡支持的版本，且大于等于V11.8)：https://developer.nvidia.com/cuda-toolkit-archive
+//检查显卡支持的最大CUDA版本命令行指令
+nvidia-smi
+(2)cuDNN下载地址(需下载CUDA支持的版本，且大于等于V8.5)：https://developer.nvidia.com/rdp/cudnn-archive
+//检查是否安装CUDA成功的命令行指令
+nvcc -V
+PS：CUDNN下载需要登录，登录不了的可以用如下方法免登录下载： 1. 找到要下载的版本，右键复制链接，把链接最后面的斜杠删掉，一定要删掉最后的斜杠噢，2. 打开迅雷，粘贴链接，然后就可以下载了，还挺快的
+
+项目部署流程：
+PS：如果命令行窗口执行过程中，一直提示SSLError或HTTPSConnectionError错误，可以设置使用代理端口克隆和下载三方库：
+代理端口地址需要通过kexue上网获取！
+设置方式：在命令行窗口运行以下指令
+set http_proxy=http://127.0.0.1:你的代理端口地址 & set https_proxy=http://127.0.0.1:你的代理端口地址
+然后执行下面的项目克隆和安装三方库。
+
+一、使用Git克隆代码
+Git安装(如果安装过Git，可跳过)：
+官方下载地址：https://git-scm.com/downloads
+Git克隆项目文件到本地：
+git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git
+cd CosyVoice
+git submodule update --init --recursive
+PS：国内用户如果克隆失败，可以多尝试几次。有魔法的话，建议开魔法克隆。
+
+二、创建环境和安装三方库：
+1. 安装Miniconda(如果安装过conda，可跳过)
+下载地址：https://docs.anaconda.com/miniconda/
+如果安装成功：输入conda --version，能返回conda版本号
+2. 创建虚拟环境：
+conda create -n cosyvoice python=3.8
+conda activate cosyvoice
+PS：如果提示CondaError: Run 'conda init' before 'conda activate'，可先执行conda init，再重新操作。
+
+3. 下载三方库
+(1) 安装pynini：
+conda install -y -c conda-forge pynini==2.1.5
+(2) 安装其他三方库：
+PS：安装前需先将requirements.txt中关于onnxruntime库的内容，删除系统判断的逻辑，改为onnxruntime==1.16.0
+官方推荐，速度慢点：
+pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host=mirrors.aliyun.com
+清华镜像，速度快：
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+PS：如果torch-2.0.1+cu118-cp38-cp38-win_amd64.whl下载过慢，可手动下载该文件后，重新激活虚拟环境，然后手动安装该库，速度会快很多。
+步骤：
+手动下载该文件(可用浏览器、IDM或迅雷下载)，文件地址：https://download.pytorch.org/whl/cu118/torch-2.0.1%2Bcu118-cp38-cp38-win_amd64.whl
+重新激活虚拟环境，运行手动安装指令：指令格式为
+pip install 下载文件的完整路径 -i https://pypi.tuna.tsinghua.edu.cn/simple
+例如：
+pip install F:\AI\torch-2.0.1+cu118-cp38-cp38-win_amd64.whl -i https://pypi.tuna.tsinghua.edu.cn/simple
+手动安装该库成功后，重新执行安装三方库指令(pip install -r requirements.txt......)，这样系统会继续安装别的库了，直到全部安装完。
+
+三、下载模型：
+新建Python程序下载模型：
+python程序代码：
+from modelscope import snapshot_download
+snapshot_download('iic/CosyVoice-300M', local_dir='pretrained_models/CosyVoice-300M')
+snapshot_download('iic/CosyVoice-300M-SFT', local_dir='pretrained_models/CosyVoice-300M-SFT')
+snapshot_download('iic/CosyVoice-300M-Instruct', local_dir='pretrained_models/CosyVoice-300M-Instruct')
+snapshot_download('iic/CosyVoice-ttsfrd', local_dir='pretrained_models/CosyVoice-ttsfrd')
+也可激活虚拟环境，直接执行Python程序download_models.py
+python download_models.py
+模型下载程序代码下载地址：https://wwd.lanzouv.com/ihkNk24cd26f
+
+四、新建启动文件：
+新建3个启动程序的批处理文件；
+内置音色生成指令：
+@echo off
+call conda activate cosyvoice
+start http://127.0.0.1:50000
+python webui.py --port 50000 --model_dir pretrained_models/CosyVoice-300M-SFT
+pause
+克隆音色+跨语种克隆指令：
+@echo off
+call conda activate cosyvoice
+start http://127.0.0.1:50001
+python webui.py --port 50001 --model_dir pretrained_models/CosyVoice-300M
+pause
+内置音色+语气微调指令：
+@echo off
+call conda activate cosyvoice
+start http://127.0.0.1:50002
+python webui.py --port 50002 --model_dir pretrained_models/CosyVoice-300M-Instruct
+pause
+也可下载3个启动文件，复制到文件夹内直接点击运行，会自动打开浏览器运行。
+下载地址：https://wwd.lanzouv.com/ihkNk24cd26f
+
+五、安装FFmpeg(非必要)
+PS：要使用非wav格式的音频，需安装FFmpeg(也可用剪辑软件将其转为wav格式)。
+下载解压后，将其目录下的bin路径配置到系统环境变量的path变量中。
+例如：D:\ffmpeg\bin
+FFmpeg下载地址：
+https://www.ffmpeg.org/download.html
+安装教程可以参考这期：AI项目部署基本环境安装教程https://www.bilibili.com/video/BV1seYteFEvy/?vd_source=6c8b8679b818b05d24c65f49a65eb994
+
+————项目使用教程————
+使用CosyVoice克隆音色的详细教程：https://www.bilibili.com/video/BV1Mz421B7bE/?vd_source=6c8b8679b818b05d24c65f49a65eb994
+
+————入门使用————
+一、根据功能需求，点击对应的.bat文件启动程序。
+1. 内置音色生成；
+2. 克隆音色+跨语种克隆；
+3. 内置音色生成+语气微调；
+浏览器页面会同步打开，但是不显示内容。需等待命令行窗口加载完成后，刷新下网页即可显示程序界面。
+PS：注意，该项目占用显存较大，尽量每次都只启动一个程序，不要同时启动多个程序，否则可能会爆显存。
+二、语气微调的Prompt可参考官网的instruction内容：
+https://fun-audio-llm.github.io/
+
+
+

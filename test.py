@@ -9,13 +9,46 @@ sys.path.append("{}/third_party/Matcha-TTS".format(ROOT_DIR))
 from cosyvoice.cli.cosyvoice import CosyVoice
 from cosyvoice.utils.file_utils import load_wav
 import torchaudio
+import torch
 
+import gradio as gr
 
 cosyvoice = CosyVoice('pretrained_models/CosyVoice-300M-Instruct')
-prompt_speech_16k = load_wav(r"D:\aisound\音色\晓辰\雄大的反应十分平静，声称那些只不过是谣言。.wav", 16000)
-output = cosyvoice.inference_zero_shot('咱们这位海军上尉阿帅，听起来就像是个从海军肥皂剧中走出来的角色，25年的海上航船经验，让他觉得这件事儿绝不像是看起来那么单纯。', '雄大的反应十分平静，声称那些只不过是谣言。', prompt_speech_16k)
-torchaudio.save(r'D:\aisound\temp\晓辰1.wav', output['tts_speech'], 22050) # type: ignore
+prompt_speech_16k = load_wav(r"D:\aisound\音色\林志玲\他会看看你在这个业界的成绩，然后知道你真的在做什么。.wav", 16000)
+prompt_text = "他会看看你在这个业界的成绩，然后知道你真的在做什么。"
 
-output = cosyvoice.inference_zero_shot("他想要去那艘神秘的船上探探究竟，结果遭到了阿伟的连环劝退，阿伟同学，你是怕他揭穿你的小把戏吗？最终，阿帅同志只能暂时放下他的侦探梦，让阿伟去休息。", '雄大的反应十分平静，声称那些只不过是谣言。', prompt_speech_16k)
-torchaudio.save(r'D:\aisound\temp\晓辰2.wav', output['tts_speech'], 22050) # type: ignore
+article = """
+阿金正在家忙活着打扫，门外忽然响起一阵砸门声，震得屋子都晃了几晃。
+门一开，一个陌生的壮汉站在门口，态度嚣张地命令他下去挪车，说是占了他的专属车位。
+阿金虽心里不爽，但还是下楼去了，刚坐上车，一滩新鲜的口水赫然出现在车窗上，显然是那壮汉的杰作。
+阿金怒了，正要发作，却瞥见对方粗壮的胳膊上纹着猛兽纹身，立马就没了脾气。
+"""
+
+# 初始化一个空的音频张量
+merged_audio = torch.tensor([])
+
+# 假设采样率为22050
+sample_rate = 22050
+
+texts = article.splitlines()
+for text in texts:
+    if not text:
+        continue
+
+    output = cosyvoice.inference_zero_shot(text, prompt_text, prompt_speech_16k)
+    audio = output['tts_speech']
+    
+    # 确保音频数据的维度正确
+    if audio.dim() == 1:
+        audio = audio.unsqueeze(0)
+    
+    # 合并音频
+    if merged_audio.numel() == 0:
+        merged_audio = audio
+    else:
+        merged_audio = torch.cat((merged_audio, audio), dim=1)
+
+# 保存合并后的音频
+output_path = r'D:\aisound\temp\林志玲_merged.wav'
+torchaudio.save(output_path, merged_audio, sample_rate) # type: ignore
 

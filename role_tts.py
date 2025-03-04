@@ -110,7 +110,7 @@ class TTSProcessor:
     def process_text(
         self,
         text: str,
-        output_dir: str = "output",
+        output_dir: str = "outputs",
         merge_files: bool = True,
         role_override: Optional[str] = None,
         method: str = "instruct",
@@ -139,7 +139,15 @@ class TTSProcessor:
                 role = role_override
                 config = self.role_config[role_override]
             else:
-                assert role, "找不到有效角色"
+                if not role:
+                    raise ValueError(
+                        f"第 {line_num + 1} 行缺少角色标识\n"
+                        f"可能原因：\n"
+                        f"1. 未使用 -r 参数指定角色\n"
+                        f"2. 配置文件中无有效角色\n"
+                        f"3. 文本行格式错误（正确格式示例：(角色|情绪)文本内容）\n"
+                        f"当前配置文件路径: {self.role_config}"
+                    )
                 role, config = self.get_role_config(role, line_num)
 
             emotion = emotion or config["default_emotion"]
@@ -199,7 +207,7 @@ class UI:
             try:
                 output_path = self.tts_processor.process_text(
                     text=text,
-                    output_dir="output",
+                    output_dir="outputs",
                     merge_files=merge_files,
                     role_override=role if role != "无" else None,
                     method=method,
@@ -259,7 +267,7 @@ def main():
         parser.add_argument(
             "-c", "--config", default="role_config.json", help="角色配置文件路径"
         )
-        parser.add_argument("-o", "--output", default="output", help="输出目录")
+        parser.add_argument("-o", "--output", default="outputs", help="输出目录")
         parser.add_argument("-r", "--role", help="强制使用指定角色")
         parser.add_argument(
             "-m",
@@ -310,3 +318,12 @@ if __name__ == "__main__":
 #   -r 晓辰 \
 #   -m zero_shot \
 #   --merge
+# # 处理中断时
+# 错误: 处理中断于第 23 行
+# 错误原因: 未定义的角色: 晓晨
+# 已生成段落保存至: outputs/temp
+# 部分合并文件: outputs/PARTIAL_OUTPUT.wav
+
+# # 恢复建议
+# 1. 修复第23行错误
+# 2. 重新运行时添加：--start-from 23 --temp-dir outputs/temp

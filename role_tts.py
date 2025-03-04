@@ -2,6 +2,7 @@ import argparse
 import datetime
 import os
 import re
+import shutil
 import sys
 from typing import List, Optional, Tuple
 
@@ -114,6 +115,7 @@ class TTSProcessor:
         merge_files: bool = True,
         role_override: Optional[str] = None,
         method: str = "instruct",
+        keep_temp: bool = False,
     ) -> Optional[str]:
         """处理文本并生成音频"""
         if role_override and role_override not in self.role_config:
@@ -127,39 +129,58 @@ class TTSProcessor:
         )
 
         all_audio = []
-        for line_num, line in enumerate(lines):
-            text = line.strip()
-            if not text:
+        temp_dir = os.path.join(output_dir, "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+
+        try:
+            for line_num, line in enumerate(lines):
+                text = line.strip()
+                if not text:
+                    if merge_files:
+                        all_audio.append(torch.zeros(1, int(0.8 * self.sample_rate)))
+                    continue
+
+                role, emotion, content = TextProcessor.parse_line(line)
+                if role_override:
+                    role = role_override
+                    config = self.role_config[role_override]
+                else:
+                    if not role:
+                        raise ValueError(
+                            f"第 {line_num + 1} 行缺少角色标识\n"
+                            f"可能原因：\n"
+                            f"1. 未使用 -r 参数指定角色\n"
+                            f"2. 配置文件中无有效角色\n"
+                            f"3. 文本行格式错误（正确格式示例：(角色|情绪)文本内容）\n"
+                            f"当前配置文件路径: {self.role_config}"
+                        )
+                    role, config = self.get_role_config(role, line_num)
+
+                emotion = emotion or config["default_emotion"]
+                audio_data = self.generate_audio(content, emotion, config, method)
+
+                # 始终先保存独立文件（即使合并模式）
+                temp_path = os.path.join(temp_dir, f"line_{line_num + 1}.wav")
+                torchaudio.save(temp_path, audio_data, self.sample_rate)
+
                 if merge_files:
-                    all_audio.append(torch.zeros(1, int(0.8 * self.sample_rate)))
-                continue
+                    all_audio.append(audio_data)
 
-            role, emotion, content = TextProcessor.parse_line(line)
-            if role_override:
-                role = role_override
-                config = self.role_config[role_override]
-            else:
-                if not role:
-                    raise ValueError(
-                        f"第 {line_num + 1} 行缺少角色标识\n"
-                        f"可能原因：\n"
-                        f"1. 未使用 -r 参数指定角色\n"
-                        f"2. 配置文件中无有效角色\n"
-                        f"3. 文本行格式错误（正确格式示例：(角色|情绪)文本内容）\n"
-                        f"当前配置文件路径: {self.role_config}"
-                    )
-                role, config = self.get_role_config(role, line_num)
+            # 合并成功后清理临时文件
+            if merge_files and all_audio and not keep_temp:
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
-            emotion = emotion or config["default_emotion"]
-            audio_data = self.generate_audio(content, emotion, config, method)
-
-            if merge_files:
-                all_audio.append(audio_data)
-            else:
-                filename = self.get_unique_filename(
-                    output_dir, base_name, "wav", line_num + 1
-                )
-                torchaudio.save(filename, audio_data, self.sample_rate)
+        except Exception as e:
+            # 异常时保留已生成的临时文件
+            error_info = (
+                f"处理中断于第 {line_num + 1} 行\n"
+                f"错误原因: {str(e)}\n"
+                f"已生成段落保存至: {temp_dir}"
+            )
+            if merge_files and all_audio:
+                partial_output = self._save_partial_audio(all_audio, output_dir)
+                error_info += f"\n部分合并文件: {partial_output}"
+            raise RuntimeError(error_info) from e
 
         if merge_files and all_audio:
             combined = torch.cat(all_audio, dim=1)
@@ -167,6 +188,13 @@ class TTSProcessor:
             torchaudio.save(output_path, combined, self.sample_rate)
             return output_path
         return None
+
+    def _save_partial_audio(self, audio_chunks, output_dir):
+        """保存已处理的部分音频"""
+        combined = torch.cat(audio_chunks, dim=1)
+        output_path = os.path.join(output_dir, "PARTIAL_OUTPUT.wav")
+        torchaudio.save(output_path, combined, self.sample_rate)
+        return output_path
 
     @staticmethod
     def get_unique_filename(
@@ -202,7 +230,11 @@ class UI:
         import gradio as gr
 
         def process_ui(
-            text: str, role: str, method: str, merge_files: bool
+            text: str,
+            role: str,
+            method: str,
+            merge_files: bool,
+            keep_temp: bool,  # 新增参数
         ) -> Tuple[str, Optional[str]]:
             try:
                 output_path = self.tts_processor.process_text(
@@ -211,16 +243,15 @@ class UI:
                     merge_files=merge_files,
                     role_override=role if role != "无" else None,
                     method=method,
+                    keep_temp=keep_temp,  # 传递参数
                 )
-                message = (
-                    "音频生成完成，请查看output目录"
-                    if not output_path
-                    else "音频生成成功"
+                message = "✅ 音频生成完成" + (
+                    "（已保留临时文件）" if keep_temp else ""
                 )
-                return message, output_path  # 返回两个值：状态消息和音频路径
+                return message, output_path
             except Exception as e:
-                error_message = f"错误: {str(e)}"
-                return error_message, None  # 发生错误时返回错误消息和None
+                error_msg = f"❌ 错误: {str(e)}\n临时文件保存在: outputs/temp"
+                return error_msg, None
 
         with gr.Blocks(title="CosyVoice语音合成") as demo:
             gr.Markdown("# CosyVoice语音合成系统")
@@ -243,7 +274,10 @@ class UI:
                         label="合成方法",
                     )
                     merge_checkbox = gr.Checkbox(value=True, label="合并音频文件")
-                    submit_btn = gr.Button("开始合成")
+                    keep_temp_check = gr.Checkbox(
+                        label="保留所有临时文件", info="即使成功完成也保留临时文件"
+                    )
+                    submit_btn = gr.Button("开始合成", variant="primary")
 
                 with gr.Column():
                     output_text = gr.Textbox(label="处理结果")
@@ -251,7 +285,13 @@ class UI:
 
             submit_btn.click(
                 fn=process_ui,
-                inputs=[text_input, role_dropdown, method_radio, merge_checkbox],
+                inputs=[
+                    text_input,
+                    role_dropdown,
+                    method_radio,
+                    merge_checkbox,
+                    keep_temp_check,
+                ],
                 outputs=[output_text, audio_output],
             )
 
@@ -282,6 +322,9 @@ def main():
             dest="merge",
             help="禁用合并功能",
         )
+        parser.add_argument(
+            "--keep-temp", action="store_true", help="保留临时文件（默认自动清理）"
+        )
         args = parser.parse_args()
 
         # 读取输入文件
@@ -296,6 +339,7 @@ def main():
             merge_files=args.merge,
             role_override=args.role,
             method=args.method,
+            keep_temp=args.keep_temp,
         )
     else:
         # UI模式

@@ -1,3 +1,4 @@
+import argparse  # 新增导入
 import datetime
 import os
 import re
@@ -66,12 +67,25 @@ def load_role_config(config_path):
     return config
 
 
+def sanitize_filename(text):
+    """生成合法文件名（保留10个有效字符）"""
+    # 移除特殊字符
+    clean_text = re.sub(r'[\\/*?:"<>|()]', "", text)
+    # 截取前10个字符
+    clean_text = clean_text[:10].strip()
+    # 如果处理后为空，使用时间戳
+    if not clean_text:
+        return datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    return clean_text
+
+
 def process_txt_file(
     file_path,
     config_path,
+    output_dir="output",  # 新增输出目录参数
     merge_files=True,
     role_override=None,
-    method="zero_shot",  # 新增方法参数，默认使用zero_shot模式
+    method="instruct",
 ):
     # 验证方法参数有效性
     if method not in ["instruct", "zero_shot"]:
@@ -88,6 +102,14 @@ def process_txt_file(
 
     all_audio = []
     sample_rate = cosyvoice.sample_rate
+
+    # 创建输出目录
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 获取基础文件名
+    with open(file_path, "r", encoding="utf-8") as f:
+        first_line = next((l for l in f if l.strip()), "").strip()
+    base_name = sanitize_filename(re.sub(r"^\([^)]*\)", "", first_line))  # 移除角色标记
 
     with open(file_path, "r", encoding="utf-8") as f:
         lines = [line for line in f]
@@ -156,18 +178,55 @@ def process_txt_file(
             if merge_files:
                 all_audio.append(audio_data)
 
+            # 保存独立文件逻辑
+            if not merge_files:
+                filename = f"{base_name}_{line_num + 1}.wav"
+                save_path = os.path.join(output_dir, filename)
+                torchaudio.save(save_path, audio_data, sample_rate)
+                print(f"生成文件: {save_path}")
+
+    # 保存合并文件逻辑
     if merge_files and all_audio:
         combined = torch.cat(all_audio, dim=1)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        output_path = f"combined_{timestamp}.wav"
+        filename = f"{base_name}_combined.wav"
+        output_path = os.path.join(output_dir, filename)
         torchaudio.save(output_path, combined, sample_rate)
-        print(f"合并后的文件已保存至: {output_path}")
+        print(f"合并文件已保存至: {output_path}")
 
 
-# 使用示例：指定使用zero_shot方法
-process_txt_file(
-    file_path=r"D:\downloads\spk2info\fanwen.txt",
-    config_path="role_config.json",
-    # role_override="晓辰",
-    method="instruct",  # 指定合成方法
-)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="CosyVoice 语音合成工具")
+    parser.add_argument("input", help="输入文本文件路径")
+    parser.add_argument("-c", "--config", required=True, help="角色配置文件路径")
+    parser.add_argument("-o", "--output", default="output", help="输出目录（默认为output）")
+    parser.add_argument("-r", "--role", help="强制使用指定角色")
+    parser.add_argument(
+        "-m",
+        "--method",
+        choices=["instruct", "zero_shot"],
+        default="instruct",
+        help="合成方法（默认instruct）",
+    )
+    parser.add_argument("--merge", action="store_true", help="合并所有段落为单个文件")
+
+    args = parser.parse_args()
+
+    process_txt_file(
+        file_path=args.input,
+        config_path=args.config,
+        output_dir=args.output,
+        merge_files=args.merge,
+        role_override=args.role,
+        method=args.method,
+    )
+
+
+# 基本用法
+# python gen_cmd.py input.txt -c role_config.json -o outputs
+
+# 高级用法
+# python gen_cmd.py input.txt -c role_config.json \
+#   -o results \
+#   -r 晓辰 \
+#   -m zero_shot \
+#   --merge

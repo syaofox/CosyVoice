@@ -50,7 +50,6 @@ cosyvoice = CosyVoice2(
 #     torchaudio.save('zero_shot_{}.wav'.format(i), j['tts_speech'], cosyvoice.sample_rate)
 
 
-
 def load_role_config(config_path):
     """加载角色配置文件"""
     import json
@@ -69,11 +68,18 @@ def load_role_config(config_path):
 
 def process_txt_file(
     file_path,
-    config_path,  # 改为配置文件路径
+    config_path,
     merge_files=True,
+    role_override=None,  # 新增角色覆盖参数
 ):
     # 加载角色配置
     role_config = load_role_config(config_path)
+
+    # 新增：预检查覆盖角色是否存在
+    if role_override:
+        if role_override not in role_config:
+            raise ValueError(f"覆盖角色不存在于配置中: {role_override}")
+        override_config = role_config[role_override]
 
     all_audio = []
     sample_rate = cosyvoice.sample_rate
@@ -91,23 +97,37 @@ def process_txt_file(
                 all_audio.append(torch.zeros(1, pause_samples))
             continue
 
-        # 解析角色和情绪
-        role, emotion = None, None
-        if line.startswith("("):
-            match = re.match(r"\(([^|)]+)(?:\|([^)]+))?\)", line)
-            if match:
-                role = match.group(1).strip()
-                emotion = match.group(2).strip() if match.group(2) else None
-                text = text[match.end() :].strip()
+        # 修改后的角色解析逻辑
+        emotion = None
+        if role_override:  # 使用覆盖角色
+            role = role_override
+            # 仍允许解析情绪
+            if line.startswith("("):
+                match = re.match(
+                    r"\([^|)]*(?:\|([^)]+))?\)", line
+                )  # 修改正则只匹配情绪
+                if match:
+                    emotion = match.group(1).strip() if match.group(1) else None
+                    text = text[match.end() :].strip()
+        else:  # 原有解析逻辑
+            role = None
+            if line.startswith("("):
+                match = re.match(r"\(([^|)]+)(?:\|([^)]+))?\)", line)
+                if match:
+                    role = match.group(1).strip()
+                    emotion = match.group(2).strip() if match.group(2) else None
+                    text = text[match.end() :].strip()
 
-        # 获取角色配置
-        if not role:
-            raise ValueError(f"第 {line_num + 1} 行缺少角色标识")
+        # 获取角色配置（修改后的逻辑）
+        if role_override:
+            config = override_config
+        else:
+            if not role:
+                raise ValueError(f"第 {line_num + 1} 行缺少角色标识")
+            if role not in role_config:
+                raise ValueError(f"未定义的角色: {role} (第 {line_num + 1} 行)")
+            config = role_config[role]
 
-        if role not in role_config:
-            raise ValueError(f"未定义的角色: {role} (第 {line_num + 1} 行)")
-
-        config = role_config[role]
         emotion = emotion or config["default_emotion"]
 
         # 执行合成
@@ -139,8 +159,9 @@ def process_txt_file(
         print(f"合并后的文件已保存至: {output_path}")
 
 
-# 使用示例
+# 使用示例：强制使用"晓辰"角色
 process_txt_file(
     file_path=r"D:\downloads\spk2info\fanwen.txt",
-    config_path="role_config.json",  # 改为配置文件路径
+    config_path="role_config.json",
+    # role_override="彩玉",  # 新增覆盖参数
 )

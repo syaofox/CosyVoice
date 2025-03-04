@@ -70,8 +70,13 @@ def process_txt_file(
     file_path,
     config_path,
     merge_files=True,
-    role_override=None,  # 新增角色覆盖参数
+    role_override=None,
+    method="zero_shot",  # 新增方法参数，默认使用zero_shot模式
 ):
+    # 验证方法参数有效性
+    if method not in ["instruct", "zero_shot"]:
+        raise ValueError(f"不支持的合成方法: {method}")
+
     # 加载角色配置
     role_config = load_role_config(config_path)
 
@@ -130,15 +135,15 @@ def process_txt_file(
 
         emotion = emotion or config["default_emotion"]
 
-        # 执行合成
-        if config["method"] == "instruct":
+        # 统一使用参数指定的方法
+        if method == "instruct":
             instruction = (
                 f"用{emotion}的语气说这句话" if emotion else "用自然的语气说这句话"
             )
             generator = cosyvoice.inference_instruct2(
                 text, instruction, config["prompt_speech"], stream=False
             )
-        elif config["method"] == "zero_shot":
+        elif method == "zero_shot":
             generator = cosyvoice.inference_zero_shot(
                 text,
                 os.path.splitext(os.path.basename(config["prompt_path"]))[0],
@@ -159,9 +164,10 @@ def process_txt_file(
         print(f"合并后的文件已保存至: {output_path}")
 
 
-# 使用示例：强制使用"晓辰"角色
+# 使用示例：指定使用zero_shot方法
 process_txt_file(
     file_path=r"D:\downloads\spk2info\fanwen.txt",
     config_path="role_config.json",
-    # role_override="彩玉",  # 新增覆盖参数
+    # role_override="晓辰",
+    method="instruct",  # 指定合成方法
 )

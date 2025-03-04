@@ -233,43 +233,223 @@ def process_txt_file(
         print(f"合并文件已保存至: {output_path}")
 
 
+def process_text_input(
+    text,
+    config_path,
+    output_dir="output",
+    merge_files=True,
+    role_override=None,
+    method="instruct",
+):
+    """处理直接输入的文本"""
+    # 加载角色配置
+    role_config = load_role_config(config_path)
+
+    # 预检查覆盖角色是否存在
+    if role_override:
+        if role_override not in role_config:
+            raise ValueError(f"覆盖角色不存在于配置中: {role_override}")
+        override_config = role_config[role_override]
+
+    all_audio = []
+    sample_rate = cosyvoice.sample_rate
+
+    # 创建输出目录
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 分割文本为行
+    lines = text.strip().split("\n")
+
+    # 获取基础文件名（使用第一行的内容）
+    first_line = next((l for l in lines if l.strip()), "").strip()
+    base_name = sanitize_filename(re.sub(r"^\([^)]*\)", "", first_line))
+
+    # 处理每一行文本
+    for line_num, line in enumerate(lines):
+        text = line.strip()
+
+        if not text:
+            if merge_files:
+                pause_samples = int(0.8 * sample_rate)
+                all_audio.append(torch.zeros(1, pause_samples))
+            continue
+
+        emotion = None
+        if role_override:
+            role = role_override
+            if line.startswith("("):
+                match = re.match(r"\([^|)]*(?:\|([^)]+))?\)", line)
+                if match:
+                    emotion = match.group(1).strip() if match.group(1) else None
+                    text = text[match.end() :].strip()
+        else:
+            role = None
+            if line.startswith("("):
+                match = re.match(r"\(([^)]+)\)", line)
+                if match:
+                    content = match.group(1)
+                    if "|" in content:
+                        role_part, emotion_part = content.split("|", 1)
+                        role = role_part.strip()
+                        emotion = emotion_part.strip()
+                    else:
+                        emotion = content.strip()
+                    text = text[match.end() :].strip()
+
+        if role_override:
+            config = override_config
+        else:
+            if not role:
+                first_role = next(iter(role_config.keys()), None)
+                if not first_role:
+                    raise ValueError(
+                        f"第 {line_num + 1} 行缺少角色标识且配置文件中无可用角色"
+                    )
+                role = first_role
+            if role not in role_config:
+                raise ValueError(f"未定义的角色: {role} (第 {line_num + 1} 行)")
+            config = role_config[role]
+
+        emotion = emotion or config["default_emotion"]
+
+        if method == "instruct":
+            instruction = (
+                f"用{emotion}的语气说这句话" if emotion else "用自然的语气说这句话"
+            )
+            generator = cosyvoice.inference_instruct2(
+                text, instruction, config["prompt_speech"], stream=False
+            )
+        elif method == "zero_shot":
+            generator = cosyvoice.inference_zero_shot(
+                text,
+                os.path.splitext(os.path.basename(config["prompt_path"]))[0],
+                config["prompt_speech"],
+                stream=False,
+            )
+
+        for i, j in enumerate(generator):
+            audio_data = j["tts_speech"]
+            if merge_files:
+                all_audio.append(audio_data)
+
+            if not merge_files:
+                filename = get_unique_filename(
+                    output_dir, base_name, "wav", line_num=line_num + 1
+                )
+                torchaudio.save(filename, audio_data, sample_rate)
+
+    # 保存合并文件
+    if merge_files and all_audio:
+        combined = torch.cat(all_audio, dim=1)
+        output_path = get_unique_filename(output_dir, base_name, "wav")
+        torchaudio.save(output_path, combined, sample_rate)
+        return output_path
+    return None
+
+
+def create_ui():
+    """创建Gradio界面"""
+    import json
+
+    import gradio as gr
+
+    # 加载角色配置以获取角色列表
+    with open("role_config.json", "r", encoding="utf-8") as f:
+        role_config = json.load(f)
+    role_list = list(role_config.keys())
+
+    def process_ui(text, role, method, merge_files):
+        try:
+            output_path = process_text_input(
+                text=text,
+                config_path="role_config.json",
+                output_dir="output",
+                merge_files=merge_files,
+                role_override=role if role != "无" else None,
+                method=method,
+            )
+            return output_path if output_path else "音频生成完成，请查看output目录"
+        except Exception as e:
+            return f"错误: {str(e)}"
+
+    with gr.Blocks(title="CosyVoice语音合成") as demo:
+        gr.Markdown("# CosyVoice语音合成系统")
+
+        with gr.Row():
+            with gr.Column():
+                text_input = gr.Textbox(
+                    label="输入文本",
+                    placeholder="在此输入要合成的文本...\n支持多行文本\n可以使用(角色|情绪)格式指定角色和情绪",
+                    lines=10,
+                )
+                role_dropdown = gr.Dropdown(
+                    choices=["无"] + role_list,
+                    value="无",
+                    label="覆盖角色（选择后将忽略文本中的角色标记）",
+                )
+                method_radio = gr.Radio(
+                    choices=["zero_shot", "instruct"],
+                    value="zero_shot",
+                    label="合成方法",
+                )
+                merge_checkbox = gr.Checkbox(value=True, label="合并音频文件")
+                submit_btn = gr.Button("开始合成")
+
+            with gr.Column():
+                output_text = gr.Textbox(label="处理结果")
+                audio_output = gr.Audio(label="合成音频")
+
+        submit_btn.click(
+            fn=process_ui,
+            inputs=[text_input, role_dropdown, method_radio, merge_checkbox],
+            outputs=[audio_output],
+        )
+
+    return demo
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="CosyVoice 语音合成工具")
-    parser.add_argument("input", help="输入文本文件路径")
-    parser.add_argument(
-        "-c",
-        "--config",
-        default="role_config.json",
-        help="角色配置文件路径（默认为role_config.json）",
-    )
-    parser.add_argument(
-        "-o", "--output", default="outputs", help="输出目录（默认为output）"
-    )
-    parser.add_argument("-r", "--role", help="强制使用指定角色")
-    parser.add_argument(
-        "-m",
-        "--method",
-        choices=["instruct", "zero_shot"],
-        default="zero_shot",
-        help="合成方法（默认zero_shot）",
-    )
-    parser.add_argument(
-        "--no-merge",
-        action="store_false",  # 反转逻辑
-        dest="merge",  # 映射到args.merge
-        help="禁用合并功能（默认自动合并）",
-    )
-
-    args = parser.parse_args()
-
-    process_txt_file(
-        file_path=args.input,
-        config_path=args.config,
-        output_dir=args.output,
-        merge_files=args.merge,
-        role_override=args.role,
-        method=args.method,
-    )
+    # 检查是否有命令行参数
+    if len(sys.argv) > 1:
+        # 使用原有的命令行处理逻辑
+        parser = argparse.ArgumentParser(description="CosyVoice 语音合成工具")
+        parser.add_argument("input", help="输入文本文件路径")
+        parser.add_argument(
+            "-c",
+            "--config",
+            default="role_config.json",
+            help="角色配置文件路径（默认为role_config.json）",
+        )
+        parser.add_argument(
+            "-o", "--output", default="outputs", help="输出目录（默认为output）"
+        )
+        parser.add_argument("-r", "--role", help="强制使用指定角色")
+        parser.add_argument(
+            "-m",
+            "--method",
+            choices=["instruct", "zero_shot"],
+            default="zero_shot",
+            help="合成方法（默认zero_shot）",
+        )
+        parser.add_argument(
+            "--no-merge",
+            action="store_false",  # 反转逻辑
+            dest="merge",  # 映射到args.merge
+            help="禁用合并功能（默认自动合并）",
+        )
+        args = parser.parse_args()
+        process_txt_file(
+            file_path=args.input,
+            config_path=args.config,
+            output_dir=args.output,
+            merge_files=args.merge,
+            role_override=args.role,
+            method=args.method,
+        )
+    else:
+        # 启动Gradio界面
+        demo = create_ui()
+        demo.launch()
 
 
 # 基本用法

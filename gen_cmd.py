@@ -197,17 +197,29 @@ def process_txt_file(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CosyVoice 语音合成工具")
     parser.add_argument("input", help="输入文本文件路径")
-    parser.add_argument("-c", "--config", required=True, help="角色配置文件路径")
-    parser.add_argument("-o", "--output", default="output", help="输出目录（默认为output）")
+    parser.add_argument(
+        "-c",
+        "--config",
+        default="role_config.json",
+        help="角色配置文件路径（默认为role_config.json）",
+    )
+    parser.add_argument(
+        "-o", "--output", default="outputs", help="输出目录（默认为output）"
+    )
     parser.add_argument("-r", "--role", help="强制使用指定角色")
     parser.add_argument(
         "-m",
         "--method",
         choices=["instruct", "zero_shot"],
-        default="instruct",
-        help="合成方法（默认instruct）",
+        default="zero_shot",
+        help="合成方法（默认zero_shot）",
     )
-    parser.add_argument("--merge", action="store_true", help="合并所有段落为单个文件")
+    parser.add_argument(
+        "--no-merge",
+        action="store_false",  # 反转逻辑
+        dest="merge",  # 映射到args.merge
+        help="禁用合并功能（默认自动合并）",
+    )
 
     args = parser.parse_args()
 
@@ -222,7 +234,7 @@ if __name__ == "__main__":
 
 
 # 基本用法
-# python gen_cmd.py input.txt -c role_config.json -o outputs
+# python gen_cmd.py input.txt
 
 # 高级用法
 # python gen_cmd.py input.txt -c role_config.json \

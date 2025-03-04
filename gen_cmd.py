@@ -79,6 +79,30 @@ def sanitize_filename(text):
     return clean_text
 
 
+def get_unique_filename(directory, base_name, extension, line_num=None):
+    """生成带有序号的不重复文件名"""
+    counter = 1
+    while True:
+        # 构建文件名
+        if line_num is not None:
+            main_part = f"{base_name}_{line_num}"
+        else:
+            main_part = f"{base_name}_combined"
+
+        # 添加序号（第一次不添加）
+        if counter > 1:
+            full_name = f"{main_part}_{counter}.{extension}"
+        else:
+            full_name = f"{main_part}.{extension}"
+
+        path = os.path.join(directory, full_name)
+
+        # 检查文件是否存在
+        if not os.path.exists(path):
+            return path
+        counter += 1
+
+
 def process_txt_file(
     file_path,
     config_path,
@@ -192,16 +216,19 @@ def process_txt_file(
 
             # 保存独立文件逻辑
             if not merge_files:
-                filename = f"{base_name}_{line_num + 1}.wav"
-                save_path = os.path.join(output_dir, filename)
-                torchaudio.save(save_path, audio_data, sample_rate)
-                print(f"生成文件: {save_path}")
+                filename = get_unique_filename(
+                    output_dir,
+                    base_name,
+                    "wav",
+                    line_num=line_num + 1,  # 传入行号参数
+                )
+                torchaudio.save(filename, audio_data, sample_rate)
+                print(f"生成文件: {filename}")
 
     # 保存合并文件逻辑
     if merge_files and all_audio:
         combined = torch.cat(all_audio, dim=1)
-        filename = f"{base_name}_combined.wav"
-        output_path = os.path.join(output_dir, filename)
+        output_path = get_unique_filename(output_dir, base_name, "wav")
         torchaudio.save(output_path, combined, sample_rate)
         print(f"合并文件已保存至: {output_path}")
 

@@ -128,29 +128,41 @@ def process_txt_file(
         emotion = None
         if role_override:  # 使用覆盖角色
             role = role_override
-            # 仍允许解析情绪
+            # 解析情绪（支持 (情绪) 或 (|情绪) 格式）
             if line.startswith("("):
-                match = re.match(
-                    r"\([^|)]*(?:\|([^)]+))?\)", line
-                )  # 修改正则只匹配情绪
+                match = re.match(r"\([^|)]*(?:\|([^)]+))?\)", line)
                 if match:
                     emotion = match.group(1).strip() if match.group(1) else None
                     text = text[match.end() :].strip()
-        else:  # 原有解析逻辑
+        else:  # 正常解析模式
             role = None
             if line.startswith("("):
-                match = re.match(r"\(([^|)]+)(?:\|([^)]+))?\)", line)
+                # 匹配整个括号内容
+                match = re.match(r"\(([^)]+)\)", line)
                 if match:
-                    role = match.group(1).strip()
-                    emotion = match.group(2).strip() if match.group(2) else None
+                    content = match.group(1)
+                    # 分割角色和情绪
+                    if "|" in content:
+                        role_part, emotion_part = content.split("|", 1)
+                        role = role_part.strip()
+                        emotion = emotion_part.strip()
+                    else:
+                        # 没有竖线时，整个内容作为情绪
+                        emotion = content.strip()
                     text = text[match.end() :].strip()
 
-        # 获取角色配置（修改后的逻辑）
+        # 获取角色配置（新增默认角色逻辑）
         if role_override:
             config = override_config
         else:
+            # 当未指定角色时，使用配置中的第一个角色
             if not role:
-                raise ValueError(f"第 {line_num + 1} 行缺少角色标识")
+                first_role = next(iter(role_config.keys()), None)
+                if not first_role:
+                    raise ValueError(
+                        f"第 {line_num + 1} 行缺少角色标识且配置文件中无可用角色"
+                    )
+                role = first_role
             if role not in role_config:
                 raise ValueError(f"未定义的角色: {role} (第 {line_num + 1} 行)")
             config = role_config[role]

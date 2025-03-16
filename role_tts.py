@@ -58,6 +58,7 @@ class TTSProcessor:
     def __init__(self, config_path: str):
         self.role_config = self.load_role_config(config_path)
         self.sample_rate = cosyvoice.sample_rate
+        self.default_role = None  # 添加默认角色属性
 
     @staticmethod
     def load_role_config(config_path: str) -> dict:
@@ -77,12 +78,9 @@ class TTSProcessor:
     def get_role_config(self, role: str, line_num: int) -> Tuple[str, dict]:
         """获取角色配置"""
         if not role:
-            first_role = next(iter(self.role_config.keys()), None)
-            if not first_role:
-                raise ValueError(
-                    f"第 {line_num + 1} 行缺少角色标识且配置文件中无可用角色"
-                )
-            role = first_role
+            if not self.default_role:
+                raise ValueError(f"第 {line_num + 1} 行缺少角色标识，且未设置默认角色")
+            role = self.default_role
         if role not in self.role_config:
             raise ValueError(f"未定义的角色: {role} (第 {line_num + 1} 行)")
         return role, self.role_config[role]
@@ -116,8 +114,10 @@ class TTSProcessor:
         role_override: Optional[str] = None,
         method: str = "instruct",
         keep_temp: bool = False,
+        default_role: Optional[str] = None,  # 添加默认角色参数
     ) -> Optional[str]:
         """处理文本并生成音频"""
+        self.default_role = default_role  # 设置默认角色
         if role_override and role_override not in self.role_config:
             raise ValueError(f"覆盖角色不存在于配置中: {role_override}")
 
@@ -232,9 +232,10 @@ class UI:
         def process_ui(
             text: str,
             role: str,
+            default_role: str,  # 新增默认角色参数
             method: str,
             merge_files: bool,
-            keep_temp: bool,  # 新增参数
+            keep_temp: bool,
         ) -> Tuple[str, Optional[str]]:
             try:
                 output_path = self.tts_processor.process_text(
@@ -243,7 +244,8 @@ class UI:
                     merge_files=merge_files,
                     role_override=role if role != "无" else None,
                     method=method,
-                    keep_temp=keep_temp,  # 传递参数
+                    keep_temp=keep_temp,
+                    default_role=default_role,  # 传递默认角色
                 )
                 message = "✅ 音频生成完成" + (
                     "（已保留临时文件）" if keep_temp else ""
@@ -263,6 +265,15 @@ class UI:
                         placeholder="在此输入要合成的文本...\n支持多行文本\n可以使用(角色|情绪)格式指定角色和情绪",
                         lines=10,
                     )
+
+                    # 添加默认角色下拉框
+                    default_role_dropdown = gr.Dropdown(
+                        choices=list(self.tts_processor.role_config.keys()),
+                        value=list(self.tts_processor.role_config.keys())[0],
+                        label="默认角色（当文本未指定角色时使用）",
+                        interactive=True,
+                    )
+
                     role_dropdown = gr.Dropdown(
                         choices=["无"] + list(self.tts_processor.role_config.keys()),
                         value="无",
@@ -288,6 +299,7 @@ class UI:
                 inputs=[
                     text_input,
                     role_dropdown,
+                    default_role_dropdown,  # 添加默认角色输入
                     method_radio,
                     merge_checkbox,
                     keep_temp_check,
@@ -325,6 +337,12 @@ def main():
         parser.add_argument(
             "--keep-temp", action="store_true", help="保留临时文件（默认自动清理）"
         )
+        parser.add_argument(
+            "-d",
+            "--default-role",
+            help="设置默认角色（当文本未指定角色时使用）",
+            required=True,
+        )
         args = parser.parse_args()
 
         # 读取输入文件
@@ -340,6 +358,7 @@ def main():
             role_override=args.role,
             method=args.method,
             keep_temp=args.keep_temp,
+            default_role=args.default_role,  # 添加默认角色参数
         )
     else:
         # UI模式

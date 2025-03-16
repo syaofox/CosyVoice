@@ -24,21 +24,48 @@ class TextProcessor:
 
     @staticmethod
     def parse_line(line: str) -> Tuple[Optional[str], Optional[str], str]:
-        """解析单行文本，返回(角色, 情绪, 文本内容)"""
+        """解析单行文本，支持多种格式
+        支持格式：
+        1. 纯文本 - 使用默认角色和默认情绪
+        2. (角色)文本 - 指定角色，使用默认情绪
+        3. (角色|情绪)文本 - 指定角色和情绪
+        4. (|情绪)文本 - 使用默认角色，指定情绪
+
+        返回: (角色, 情绪, 文本内容)
+        """
         text = line.strip()
         role = emotion = None
 
-        if line.startswith("("):
-            match = re.match(r"\(([^)]+)\)", line)
+        # 检查是否有括号标记
+        if text.startswith("("):
+            # 使用非贪婪匹配来处理可能的嵌套括号
+            match = re.match(r"\((.*?)\)(.*)", text)
             if match:
-                content = match.group(1)
+                content = match.group(1).strip()
+                text = match.group(2).strip()
+
+                # 解析括号内容
                 if "|" in content:
-                    role_part, emotion_part = content.split("|", 1)
-                    role = role_part.strip()
-                    emotion = emotion_part.strip()
+                    # 格式: (角色|情绪) 或 (|情绪)
+                    parts = [p.strip() for p in content.split("|", 1)]
+                    role_part = parts[0]
+                    emotion = parts[1]
+
+                    # 处理可能的空值
+                    if role_part:
+                        role = role_part
                 else:
-                    emotion = content.strip()
-                text = text[match.end() :].strip()
+                    # 格式: (角色)
+                    role = content
+
+        # 清理文本中的方括号表情标记
+        text = re.sub(r"\[.*?\]", "", text).strip()
+
+        # 确保所有返回值都经过清理
+        if role:
+            role = role.strip()
+        if emotion:
+            emotion = emotion.strip()
 
         return role, emotion, text
 
@@ -120,6 +147,8 @@ class TTSProcessor:
         self.default_role = default_role  # 设置默认角色
         if role_override and role_override not in self.role_config:
             raise ValueError(f"覆盖角色不存在于配置中: {role_override}")
+        if not default_role:
+            raise ValueError("必须指定默认角色")
 
         os.makedirs(output_dir, exist_ok=True)
         lines = text.strip().split("\n")
@@ -145,15 +174,6 @@ class TTSProcessor:
                     role = role_override
                     config = self.role_config[role_override]
                 else:
-                    if not role:
-                        raise ValueError(
-                            f"第 {line_num + 1} 行缺少角色标识\n"
-                            f"可能原因：\n"
-                            f"1. 未使用 -r 参数指定角色\n"
-                            f"2. 配置文件中无有效角色\n"
-                            f"3. 文本行格式错误（正确格式示例：(角色|情绪)文本内容）\n"
-                            f"当前配置文件路径: {self.role_config}"
-                        )
                     role, config = self.get_role_config(role, line_num)
 
                 emotion = emotion or config["default_emotion"]
@@ -262,7 +282,7 @@ class UI:
                 with gr.Column():
                     text_input = gr.Textbox(
                         label="输入文本",
-                        placeholder="在此输入要合成的文本...\n支持多行文本\n可以使用(角色|情绪)格式指定角色和情绪",
+                        placeholder="在此输入要合成的文本...\n支持多行文本\n支持格式：\n1. 纯文本 - 使用默认角色和默认情绪\n2. (角色)文本 - 指定角色，使用默认情绪\n3. (角色|情绪)文本 - 指定角色和情绪\n4. (|情绪)文本 - 使用默认角色，指定情绪",
                         lines=10,
                     )
 
